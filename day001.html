@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DVA-C02 模擬試験 Day 001</title>
+<link rel="stylesheet" href="assets/css/app.css">
+<script>
+  /* 保存済みテーマを描画前に適用（ちらつき防止） */
+  try { var t = localStorage.getItem("dva-theme"); if (t) document.documentElement.dataset.theme = JSON.parse(t); } catch (e) {}
+</script>
+</head>
+<body>
+
+<header class="appbar">
+  <div class="appbar__logo" aria-hidden="true">DVA</div>
+  <div class="appbar__title">
+    <strong>DVA-C02 Practice Exam</strong>
+    <span id="appDay">Day</span>
+  </div>
+  <div class="appbar__spacer"></div>
+  <div class="appbar__progress" id="examStatus" hidden>
+    <span class="label" id="progressText"></span>
+    <span class="bar"><i id="progressBar"></i></span>
+    <span class="timer" id="timer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>
+      <span id="timerText">00:00</span>
+    </span>
+  </div>
+  <button class="icon-btn" id="themeBtn" type="button" aria-label="ライト/ダーク表示を切り替え">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+  </button>
+</header>
+
+<main class="app">
+
+  <!-- ===== 開始画面 ===== -->
+  <section class="view" id="view-start" hidden>
+    <div class="card hero">
+      <div>
+        <div class="hero__eyebrow">AWS Certified Developer – Associate</div>
+        <h1 id="startTitle">模擬試験</h1>
+        <p class="hero__lead">本試験と同じ CBT 形式です。選択肢の順序は開始するたびにシャッフルされます。</p>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="stat__label">問題数</div><div class="stat__value" id="statCount">—</div></div>
+        <div class="stat"><div class="stat__label">制限時間</div><div class="stat__value" id="statTime">—</div></div>
+        <div class="stat"><div class="stat__label">複数選択問題</div><div class="stat__value" id="statMulti">—</div></div>
+        <div class="stat"><div class="stat__label">前回のスコア（<span id="statLastDate">未受験</span>）</div><div class="stat__value" id="statLast">—</div></div>
+      </div>
+      <div class="chips" id="startDomains"></div>
+      <ul class="rules">
+        <li>複数選択問題は、指定された数だけ選択してください。指定数に達するとそれ以上は選べません。</li>
+        <li>後で確認したい問題には「見直し」フラグを付けられます。左の問題パレットで状態を確認できます。</li>
+        <li>採点は完全一致のみ（部分点なし）です。合格ラインの目安は 72%（本試験のスケールスコア 720 相当）です。</li>
+        <li>時間切れになると自動的に採点されます。</li>
+      </ul>
+      <p class="kbd-hint">ショートカット: <kbd>1</kbd>〜<kbd>7</kbd> / <kbd>A</kbd>〜<kbd>G</kbd> 選択　<kbd>←</kbd><kbd>→</kbd> 前後の問題　<kbd>F</kbd> 見直し</p>
+      <div><button class="btn btn--primary btn--lg" id="startBtn" type="button">試験を開始する</button></div>
+    </div>
+  </section>
+
+  <!-- ===== 試験画面 ===== -->
+  <section class="view exam" id="view-exam" hidden>
+    <aside class="card qnav" aria-label="問題パレット">
+      <div class="qnav__title">問題パレット</div>
+      <ol class="qnav__list" id="qnavList"></ol>
+      <div class="legend">
+        <span><i></i>未回答</span>
+        <span><i class="a"></i>回答済み</span>
+        <span><i class="f"></i>見直し</span>
+      </div>
+      <button class="btn btn--block" id="finishBtnSide" type="button">試験を終了</button>
+    </aside>
+
+    <article class="card question">
+      <header class="question__head">
+        <span class="question__no" id="qNo"></span>
+        <span class="chips" id="qChips"></span>
+      </header>
+      <div class="prose" id="qText"></div>
+      <p class="question__instruction" id="qInstruction"></p>
+      <div class="options" id="qOptions"></div>
+    </article>
+  </section>
+
+  <!-- ===== 結果画面 ===== -->
+  <section class="view result" id="view-result" hidden>
+    <div class="card summary">
+      <div class="ring" id="scoreRing">
+        <div class="ring__label"><strong id="scoreValue">0/0</strong><span id="scoreRate">0%</span></div>
+      </div>
+      <div>
+        <p class="verdict" id="verdict"></p>
+        <p class="summary__meta" id="summaryMeta"></p>
+        <div class="domains" id="domainBars"></div>
+        <div class="summary__actions">
+          <button class="btn btn--primary" id="retryBtn" type="button">もう一度解く（再シャッフル）</button>
+          <button class="btn" id="homeBtn" type="button">スタート画面へ</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="解説の絞り込み">
+      <button class="tab is-active" type="button" role="tab" data-filter="all">すべて<span class="count"></span></button>
+      <button class="tab" type="button" role="tab" data-filter="wrong">不正解<span class="count"></span></button>
+      <button class="tab" type="button" role="tab" data-filter="flagged">見直し<span class="count"></span></button>
+    </div>
+    <div class="reviews" id="reviewList"></div>
+  </section>
+</main>
+
+<!-- ===== 下部アクションバー ===== -->
+<nav class="actionbar" id="actionbar" hidden>
+  <div class="actionbar__inner">
+    <button class="btn" id="prevBtn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      <span class="label">前へ</span>
+    </button>
+    <button class="btn" id="flagBtn" type="button" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 21V4h11l-1.5 4L16 12H5"/></svg>
+      <span class="label" id="flagLabel">見直し</span>
+    </button>
+    <span class="actionbar__spacer"></span>
+    <span class="actionbar__status" id="actionStatus"></span>
+    <span class="actionbar__spacer"></span>
+    <button class="btn" id="nextBtn" type="button">
+      <span class="label">次へ</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <button class="btn btn--primary" id="finishBtn" type="button">終了</button>
+  </div>
+</nav>
+
+<!-- ===== モーダル / トースト ===== -->
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
+  <div class="card modal">
+    <h2 id="modalTitle"></h2>
+    <div id="modalBody"></div>
+    <div class="modal__actions">
+      <button class="btn" id="modalCancel" type="button">キャンセル</button>
+      <button class="btn btn--primary" id="modalOk" type="button">OK</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="data/day001.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
