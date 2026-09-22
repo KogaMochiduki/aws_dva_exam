@@ -2,8 +2,10 @@
  * type: "single" | "multi" / pick: 選択数
  * options[].correct: 正解フラグ / options[].why: 選択肢ごとの解説
  */
-window.DVA_EXAM = {
+(window.DVA_EXAMS = window.DVA_EXAMS || []).push({
   day: "001",
+  date: "2026-09-23",
+  title: "キャッシュ戦略・シークレット管理・段階的デプロイ",
   minutes: 10,
   questions: [
   /* ---------- Q1: 重量級（分野1・2・4 横断） ---------- */
@@ -305,4 +307,4 @@ window.DVA_EXAM = {
     ]
   }
   ]
-};
+});

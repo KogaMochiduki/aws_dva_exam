@@ -85,6 +85,7 @@ pre {
 .btn--primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn--ghost { background: transparent; }
 .btn--block { width: 100%; }
+a.btn { text-decoration: none; }
 .btn--lg { min-height: 48px; padding: 0 28px; font-size: 16px; }
 .btn.is-on { color: var(--flag); border-color: var(--flag); background: var(--flag-soft); }
 .btn svg { width: 18px; height: 18px; flex: none; }
@@ -140,6 +141,28 @@ pre {
 .view { animation: fade .2s ease-out; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+
+/* ---------- ホーム画面 ---------- */
+.home { display: grid; gap: 20px; }
+.home__head h1 { margin: 0; font-size: 26px; line-height: 1.35; }
+.home__head p { margin: 4px 0 0; color: var(--ink-2); }
+.section-title { margin: 8px 0 -8px; font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: .06em; }
+.days { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.daycard {
+  display: grid; gap: 10px; align-content: start;
+  padding: 18px 20px; color: inherit; text-decoration: none;
+  transition: border-color .15s, transform .15s;
+}
+a.daycard:hover { border-color: var(--accent); transform: translateY(-2px); }
+.daycard__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.daycard__day { font-size: 20px; font-weight: 800; }
+.daycard__title { font-weight: 600; line-height: 1.5; }
+.daycard__meta { font-size: 13px; color: var(--muted); }
+.daycard.is-loading { opacity: .6; }
+.daycard.is-error { border-color: var(--ng); color: var(--ng); }
+.backlink { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; font-weight: 600; text-decoration: none; }
+.backlink svg { width: 16px; height: 16px; }
+.appbar__home { display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; min-width: 0; }
 
 /* ---------- 開始画面 ---------- */
 .hero { padding: 32px; display: grid; gap: 24px; }
@@ -336,7 +359,8 @@ kbd {
 @media (max-width: 600px) {
   .app { padding: 12px 16px 32px; }
   .hero { padding: 20px; }
-  .hero h1 { font-size: 22px; }
+  .hero h1, .home__head h1 { font-size: 22px; }
+  .days { grid-template-columns: minmax(0, 1fr); }
   .question { padding: 16px; }
   .appbar__title span, .appbar__progress .label { display: none; }
   .appbar__progress .bar { width: 56px; }

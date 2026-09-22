@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DVA-C02 模擬試験 Day 001</title>
+<title>DVA-C02 模擬試験</title>
 <link rel="stylesheet" href="assets/css/app.css">
 <script>
   /* 保存済みテーマを描画前に適用（ちらつき防止） */
@@ -13,11 +13,13 @@
 <body>
 
 <header class="appbar">
-  <div class="appbar__logo" aria-hidden="true">DVA</div>
-  <div class="appbar__title">
-    <strong>DVA-C02 Practice Exam</strong>
-    <span id="appDay">Day</span>
-  </div>
+  <a class="appbar__home" href="#/" aria-label="ホームへ">
+    <span class="appbar__logo" aria-hidden="true">DVA</span>
+    <span class="appbar__title">
+      <strong>DVA-C02 Practice Exam</strong>
+      <span id="appDay">ホーム</span>
+    </span>
+  </a>
   <div class="appbar__spacer"></div>
   <div class="appbar__progress" id="examStatus" hidden>
     <span class="label" id="progressText"></span>
@@ -34,13 +36,32 @@
 
 <main class="app">
 
+  <!-- ===== ホーム画面 ===== -->
+  <section class="view home" id="view-home" hidden>
+    <div class="home__head">
+      <div class="hero__eyebrow">AWS Certified Developer – Associate</div>
+      <h1>DVA-C02 模擬試験</h1>
+      <p>受験する日を選んでください。各日とも本試験と同じ CBT 形式で、選択肢は毎回シャッフルされます。</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat__label">収録日数</div><div class="stat__value" id="homeDays">—</div></div>
+      <div class="stat"><div class="stat__label">総問題数</div><div class="stat__value" id="homeQuestions">—</div></div>
+      <div class="stat"><div class="stat__label">受験済み</div><div class="stat__value" id="homeTaken">—</div></div>
+      <div class="stat"><div class="stat__label">前回スコアの平均正答率</div><div class="stat__value" id="homeRate">—</div></div>
+    </div>
+    <h2 class="section-title">問題セット</h2>
+    <div class="days" id="dayList"></div>
+  </section>
+
   <!-- ===== 開始画面 ===== -->
   <section class="view" id="view-start" hidden>
     <div class="card hero">
       <div>
-        <div class="hero__eyebrow">AWS Certified Developer – Associate</div>
+        <a class="backlink" href="#/">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>ホームへ戻る
+        </a>
         <h1 id="startTitle">模擬試験</h1>
-        <p class="hero__lead">本試験と同じ CBT 形式です。選択肢の順序は開始するたびにシャッフルされます。</p>
+        <p class="hero__lead" id="startSubtitle"></p>
       </div>
       <div class="stats">
         <div class="stat"><div class="stat__label">問題数</div><div class="stat__value" id="statCount">—</div></div>
@@ -51,7 +72,7 @@
       <div class="chips" id="startDomains"></div>
       <ul class="rules">
         <li>複数選択問題は、指定された数だけ選択してください。指定数に達するとそれ以上は選べません。</li>
-        <li>後で確認したい問題には「見直し」フラグを付けられます。左の問題パレットで状態を確認できます。</li>
+        <li>後で確認したい問題には「見直し」フラグを付けられます。問題パレットで状態を確認できます。</li>
         <li>採点は完全一致のみ（部分点なし）です。合格ラインの目安は 72%（本試験のスケールスコア 720 相当）です。</li>
         <li>時間切れになると自動的に採点されます。</li>
       </ul>
@@ -96,7 +117,7 @@
         <div class="domains" id="domainBars"></div>
         <div class="summary__actions">
           <button class="btn btn--primary" id="retryBtn" type="button">もう一度解く（再シャッフル）</button>
-          <button class="btn" id="homeBtn" type="button">スタート画面へ</button>
+          <a class="btn" href="#/">ホームへ戻る</a>
         </div>
       </div>
     </div>
@@ -145,7 +166,8 @@
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
 
-<script src="data/day001.js"></script>
+<!-- 収録日の一覧（各日の問題データは app.js が data/dayXXX.js を動的に読み込む） -->
+<script src="data/days.js"></script>
 <script src="assets/js/app.js"></script>
 </body>
 </html>

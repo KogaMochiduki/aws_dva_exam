@@ -1,27 +1,46 @@
 /* =========================================================
  *  DVA-C02 模擬試験アプリ 共通エンジン
- *  問題データは data/dayXXX.js の window.DVA_EXAM から読み込む。
+ *  - data/days.js の window.DVA_DAYS に並んだ日をホームに表示する
+ *  - 各日の問題は data/dayXXX.js が window.DVA_EXAMS に push する
+ *  - 画面遷移はハッシュ（#/ = ホーム、#/day/001 = Day 001）
  *  file:// で開けるよう、fetch や ES Modules は使わない。
  * ========================================================= */
 (function () {
   "use strict";
 
-  const EXAM = window.DVA_EXAM;
-  const QUESTIONS = EXAM.questions;
-  const EXAM_SECONDS = (EXAM.minutes || QUESTIONS.length * 2) * 60;
+  const DAYS = window.DVA_DAYS || [];
   const PASS_RATE = 0.72;
   const LETTERS = "ABCDEFG";
   const DOMAINS = { 1: "開発", 2: "セキュリティ", 3: "デプロイ", 4: "トラブルシューティングと最適化" };
-  const HISTORY_KEY = `dva-history-${EXAM.day}`;
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const store = {
     get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } },
     set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { /* 保存できなくても動作は継続 */ } }
   };
+  const historyKey = (day) => `dva-history-${day}`;
 
-  let state = null;
+  let exam = null;      // 表示中の日のデータ
+  let state = null;     // 受験中の状態
   let reviewFilter = "all";
+
+  /* ---------- データ読み込み ---------- */
+  const loading = {};
+  function loadDay(day) {
+    if (!loading[day]) {
+      loading[day] = new Promise((resolve, reject) => {
+        const found = () => (window.DVA_EXAMS || []).find((e) => e.day === day);
+        if (found()) return resolve(found());
+        const s = document.createElement("script");
+        s.src = `data/day${day}.js`;
+        s.onload = () => (found() ? resolve(found()) : reject(new Error(`data/day${day}.js に day: "${day}" のデータがありません`)));
+        s.onerror = () => reject(new Error(`data/day${day}.js が見つかりません`));
+        document.head.appendChild(s);
+      });
+    }
+    return loading[day];
+  }
+  const examSeconds = (e) => (e.minutes || e.questions.length * 2) * 60;
 
   /* ---------- ユーティリティ ---------- */
   function shuffle(arr) {
@@ -42,22 +61,29 @@
     return [...new Set((q.domain.match(/分野(\d)/g) || []).map((d) => Number(d.slice(2))))];
   }
 
-  function isAnswered(qi) {
-    return state.answers[qi].size === QUESTIONS[qi].pick;
+  function domainChips(e) {
+    return [...new Set(e.questions.flatMap(domainsOf))].sort()
+      .map((d) => `<span class="chip chip--accent">分野${d} ${DOMAINS[d]}</span>`).join("");
   }
+
+  const isAnswered = (qi) => state.answers[qi].size === exam.questions[qi].pick;
 
   function isCorrect(qi) {
     const picked = state.answers[qi];
-    const correct = QUESTIONS[qi].options.map((o, i) => (o.correct ? i : -1)).filter((i) => i >= 0);
+    const correct = exam.questions[qi].options.map((o, i) => (o.correct ? i : -1)).filter((i) => i >= 0);
     return picked.size === correct.length && correct.every((i) => picked.has(i));
   }
 
+  const inExam = () => state && !state.finished;
+
   function showView(name) {
-    ["start", "exam", "result"].forEach((v) => { $(`#view-${v}`).hidden = v !== name; });
+    ["home", "start", "exam", "result"].forEach((v) => { $(`#view-${v}`).hidden = v !== name; });
     $("#actionbar").hidden = name !== "exam";
     $("#examStatus").hidden = name !== "exam";
     window.scrollTo(0, 0);
   }
+
+  function setAppbarSub(text) { $("#appDay").textContent = text; }
 
   let toastTimer = null;
   function toast(msg) {
@@ -80,32 +106,124 @@
   function closeModal() { $("#overlay").hidden = true; }
   const modalOpen = () => !$("#overlay").hidden;
 
+  /* ---------- ルーティング ---------- */
+  let currentHash = location.hash;
+  let leaving = false;
+
+  function route() {
+    // 受験中に戻る操作などで別画面へ移ろうとしたら、確認してから中断する
+    if (inExam() && !leaving) {
+      const target = location.hash;
+      history.replaceState(null, "", currentHash);
+      openModal("試験を中断しますか？", `<p style="margin:0;color:var(--ink-2)">回答内容は保存されません。</p>`, "中断する", () => {
+        abortExam();
+        leaving = true;
+        location.hash = target || "#/";
+      });
+      return;
+    }
+    leaving = false;
+    currentHash = location.hash;
+
+    const m = location.hash.match(/^#\/day\/(\d+)$/);
+    if (m) openDay(m[1]); else renderHome();
+  }
+
+  function abortExam() {
+    if (state) clearInterval(state.timerId);
+    state = null;
+  }
+
+  /* ---------- ホーム画面 ---------- */
+  function renderHome() {
+    abortExam();
+    exam = null;
+    document.title = "DVA-C02 模擬試験";
+    setAppbarSub("ホーム");
+    showView("home");
+
+    const list = $("#dayList");
+    list.innerHTML = DAYS.length ? "" : `<div class="card empty">data/days.js に日が登録されていません</div>`;
+    DAYS.forEach((day) => {
+      const card = document.createElement("a");
+      card.className = "card daycard is-loading";
+      card.href = `#/day/${day}`;
+      card.innerHTML = `<div class="daycard__day">Day ${day}</div><div class="daycard__title">読み込み中…</div>`;
+      list.appendChild(card);
+    });
+
+    Promise.allSettled(DAYS.map(loadDay)).then((results) => {
+      let questions = 0, taken = 0, okSum = 0, totalSum = 0;
+      results.forEach((r, i) => {
+        const day = DAYS[i], card = list.children[i];
+        card.classList.remove("is-loading");
+        if (r.status === "rejected") {
+          card.classList.add("is-error");
+          card.removeAttribute("href");
+          card.innerHTML = `<div class="daycard__day">Day ${day}</div><div class="daycard__title">${r.reason.message}</div>`;
+          return;
+        }
+        const e = r.value, last = store.get(historyKey(day));
+        questions += e.questions.length;
+        if (last) { taken++; okSum += last.ok; totalSum += last.total; }
+        const pass = last && last.ok / last.total >= PASS_RATE;
+        card.innerHTML = `
+          <div class="daycard__top">
+            <span class="daycard__day">Day ${day}</span>
+            ${last
+              ? `<span class="badge ${pass ? "badge--ok" : "badge--ng"}">前回 ${last.ok}/${last.total}</span>`
+              : `<span class="chip">未受験</span>`}
+          </div>
+          <div class="daycard__title">${e.title || ""}</div>
+          <div class="chips">${domainChips(e)}</div>
+          <div class="daycard__meta">${e.questions.length} 問 ・ ${examSeconds(e) / 60} 分${e.date ? ` ・ ${e.date}` : ""}</div>`;
+      });
+      $("#homeDays").textContent = `${DAYS.length} 日`;
+      $("#homeQuestions").textContent = `${questions} 問`;
+      $("#homeTaken").textContent = `${taken} / ${DAYS.length}`;
+      $("#homeRate").textContent = totalSum ? `${Math.round((okSum / totalSum) * 100)}%` : "—";
+    });
+  }
+
   /* ---------- 開始画面 ---------- */
+  function openDay(day) {
+    abortExam();
+    loadDay(day).then((e) => {
+      exam = e;
+      renderStart();
+      showView("start");
+    }).catch((err) => {
+      toast(err.message);
+      location.hash = "#/";
+    });
+  }
+
   function renderStart() {
-    document.title = `DVA-C02 模擬試験 Day ${EXAM.day}`;
-    $("#appDay").textContent = `Day ${EXAM.day}`;
-    $("#startTitle").textContent = `Day ${EXAM.day} 模擬試験`;
-    $("#statCount").textContent = `${QUESTIONS.length} 問`;
-    $("#statTime").textContent = `${EXAM_SECONDS / 60} 分`;
-    $("#statMulti").textContent = `${QUESTIONS.filter((q) => q.type === "multi").length} 問`;
+    const qs = exam.questions;
+    document.title = `DVA-C02 模擬試験 Day ${exam.day}`;
+    setAppbarSub(`Day ${exam.day}`);
+    $("#startTitle").textContent = `Day ${exam.day} 模擬試験`;
+    $("#startSubtitle").textContent = exam.title || "";
+    $("#statCount").textContent = `${qs.length} 問`;
+    $("#statTime").textContent = `${examSeconds(exam) / 60} 分`;
+    $("#statMulti").textContent = `${qs.filter((q) => q.type === "multi").length} 問`;
+    $("#startDomains").innerHTML = domainChips(exam);
 
-    const used = new Set(QUESTIONS.flatMap(domainsOf));
-    $("#startDomains").innerHTML = [...used].sort()
-      .map((d) => `<span class="chip chip--accent">分野${d} ${DOMAINS[d]}</span>`).join("");
-
-    const last = store.get(HISTORY_KEY);
+    const last = store.get(historyKey(exam.day));
     $("#statLast").textContent = last ? `${last.ok} / ${last.total}` : "—";
     $("#statLastDate").textContent = last ? new Date(last.at).toLocaleDateString("ja-JP") : "未受験";
   }
 
   /* ---------- 試験 ---------- */
   function startExam() {
+    abortExam();
     state = {
       current: 0,
-      order: QUESTIONS.map((q) => shuffle(q.options.map((_, i) => i))),
-      answers: QUESTIONS.map(() => new Set()),
+      order: exam.questions.map((q) => shuffle(q.options.map((_, i) => i))),
+      answers: exam.questions.map(() => new Set()),
       flags: new Set(),
-      remaining: EXAM_SECONDS,
+      total: examSeconds(exam),
+      remaining: examSeconds(exam),
       startedAt: Date.now(),
       timerId: null,
       finished: false
@@ -118,7 +236,7 @@
   }
 
   function tick() {
-    state.remaining = Math.max(EXAM_SECONDS - Math.floor((Date.now() - state.startedAt) / 1000), 0);
+    state.remaining = Math.max(state.total - Math.floor((Date.now() - state.startedAt) / 1000), 0);
     updateTimer();
     if (state.remaining === 0) finishExam();
   }
@@ -135,16 +253,17 @@
   }
 
   function renderProgress() {
-    const done = QUESTIONS.filter((_, i) => isAnswered(i)).length;
-    $("#progressText").textContent = `${done} / ${QUESTIONS.length} 回答`;
-    $("#progressBar").style.width = `${(done / QUESTIONS.length) * 100}%`;
-    $("#actionStatus").textContent = `問題 ${state.current + 1} / ${QUESTIONS.length}`;
+    const total = exam.questions.length;
+    const done = exam.questions.filter((_, i) => isAnswered(i)).length;
+    $("#progressText").textContent = `${done} / ${total} 回答`;
+    $("#progressBar").style.width = `${(done / total) * 100}%`;
+    $("#actionStatus").textContent = `問題 ${state.current + 1} / ${total}`;
   }
 
   function renderNav() {
     const list = $("#qnavList");
     list.innerHTML = "";
-    QUESTIONS.forEach((q, i) => {
+    exam.questions.forEach((_, i) => {
       const li = document.createElement("li");
       const btn = document.createElement("button");
       btn.type = "button";
@@ -161,7 +280,7 @@
   }
 
   function renderQuestion() {
-    const qi = state.current, q = QUESTIONS[qi], picked = state.answers[qi];
+    const qi = state.current, q = exam.questions[qi], picked = state.answers[qi];
     const multi = q.type === "multi";
     const full = multi && picked.size >= q.pick;
 
@@ -195,7 +314,7 @@
     });
 
     $("#prevBtn").disabled = qi === 0;
-    $("#nextBtn").disabled = qi === QUESTIONS.length - 1;
+    $("#nextBtn").disabled = qi === exam.questions.length - 1;
     const flagged = state.flags.has(qi);
     $("#flagBtn").classList.toggle("is-on", flagged);
     $("#flagBtn").setAttribute("aria-pressed", String(flagged));
@@ -203,7 +322,7 @@
   }
 
   function choose(optIdx) {
-    const qi = state.current, q = QUESTIONS[qi], picked = state.answers[qi];
+    const qi = state.current, q = exam.questions[qi], picked = state.answers[qi];
     if (q.type === "single") {
       picked.clear();
       picked.add(optIdx);
@@ -219,7 +338,7 @@
   }
 
   function goTo(i) {
-    if (i < 0 || i >= QUESTIONS.length) return;
+    if (i < 0 || i >= exam.questions.length) return;
     state.current = i;
     renderExam();
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -232,7 +351,7 @@
   }
 
   function confirmFinish() {
-    const unanswered = QUESTIONS.filter((_, i) => !isAnswered(i)).length;
+    const unanswered = exam.questions.filter((_, i) => !isAnswered(i)).length;
     openModal("試験を終了しますか？",
       `<div class="modal__stats">
          <div class="stat"><div class="stat__label">未回答・選択不足</div><div class="stat__value">${unanswered} 問</div></div>
@@ -244,33 +363,32 @@
 
   /* ---------- 結果 ---------- */
   function finishExam() {
-    if (!state || state.finished) return;
+    if (!inExam()) return;
     state.finished = true;
     clearInterval(state.timerId);
     closeModal();
 
-    state.results = QUESTIONS.map((_, i) => isCorrect(i));
+    const qs = exam.questions;
+    state.results = qs.map((_, i) => isCorrect(i));
     const ok = state.results.filter(Boolean).length;
-    const total = QUESTIONS.length;
-    const rate = ok / total;
+    const rate = ok / qs.length;
     const pass = rate >= PASS_RATE;
-    const used = EXAM_SECONDS - state.remaining;
-    store.set(HISTORY_KEY, { ok, total, at: Date.now() });
+    store.set(historyKey(exam.day), { ok, total: qs.length, at: Date.now() });
 
     const ring = $("#scoreRing");
     ring.style.setProperty("--p", Math.round(rate * 100));
     ring.classList.toggle("is-pass", pass);
     ring.classList.toggle("is-fail", !pass);
-    $("#scoreValue").textContent = `${ok}/${total}`;
+    $("#scoreValue").textContent = `${ok}/${qs.length}`;
     $("#scoreRate").textContent = `${Math.round(rate * 100)}%`;
     $("#verdict").textContent = pass ? "合格ライン到達" : "合格ライン未達";
     $("#verdict").className = "verdict " + (pass ? "is-pass" : "is-fail");
     $("#summaryMeta").textContent =
-      `合格ラインの目安 ${Math.round(PASS_RATE * 100)}% ／ 所要時間 ${fmtTime(used)} ／ 見直しフラグ ${state.flags.size} 問`;
+      `Day ${exam.day} ／ 合格ラインの目安 ${Math.round(PASS_RATE * 100)}% ／ 所要時間 ${fmtTime(state.total - state.remaining)} ／ 見直しフラグ ${state.flags.size} 問`;
 
     // 分野別の正答（複数分野にまたがる問題は各分野に計上）
     const byDomain = {};
-    QUESTIONS.forEach((q, i) => domainsOf(q).forEach((d) => {
+    qs.forEach((q, i) => domainsOf(q).forEach((d) => {
       byDomain[d] = byDomain[d] || { ok: 0, total: 0 };
       byDomain[d].total++;
       if (state.results[i]) byDomain[d].ok++;
@@ -284,15 +402,13 @@
       </div>`;
     }).join("");
 
-    $("#progressText").textContent = "採点済み";
-    $("#progressBar").style.width = "100%";
     renderReviews();
     showView("result");
   }
 
   function renderReviews() {
     const counts = {
-      all: QUESTIONS.length,
+      all: exam.questions.length,
       wrong: state.results.filter((r) => !r).length,
       flagged: state.flags.size
     };
@@ -305,7 +421,7 @@
 
     const list = $("#reviewList");
     list.innerHTML = "";
-    const targets = QUESTIONS.map((_, i) => i).filter((i) =>
+    const targets = exam.questions.map((_, i) => i).filter((i) =>
       reviewFilter === "all" || (reviewFilter === "wrong" && !state.results[i]) || (reviewFilter === "flagged" && state.flags.has(i)));
 
     if (!targets.length) {
@@ -316,7 +432,7 @@
   }
 
   function reviewHtml(qi) {
-    const q = QUESTIONS[qi], picked = state.answers[qi], order = state.order[qi], ok = state.results[qi];
+    const q = exam.questions[qi], picked = state.answers[qi], order = state.order[qi], ok = state.results[qi];
     const letterOf = (optIdx) => LETTERS[order.indexOf(optIdx)];
     const correctLetters = order.filter((i) => q.options[i].correct).map(letterOf).join(", ");
     const pickedLetters = order.filter((i) => picked.has(i)).map(letterOf).join(", ") || "未回答";
@@ -369,7 +485,7 @@
   /* ---------- キーボード操作 ---------- */
   function onKey(e) {
     if (e.key === "Escape" && modalOpen()) { closeModal(); return; }
-    if (modalOpen() || !state || state.finished || $("#view-exam").hidden) return;
+    if (modalOpen() || !inExam() || $("#view-exam").hidden) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
 
     const key = e.key.toUpperCase();
@@ -392,7 +508,6 @@
   $("#finishBtn").addEventListener("click", confirmFinish);
   $("#finishBtnSide").addEventListener("click", confirmFinish);
   $("#retryBtn").addEventListener("click", startExam);
-  $("#homeBtn").addEventListener("click", () => { renderStart(); showView("start"); });
   $("#modalCancel").addEventListener("click", closeModal);
   $("#overlay").addEventListener("click", (e) => { if (e.target === $("#overlay")) closeModal(); });
   $("#themeBtn").addEventListener("click", toggleTheme);
@@ -401,7 +516,7 @@
     renderReviews();
   }));
   document.addEventListener("keydown", onKey);
+  window.addEventListener("hashchange", route);
 
-  renderStart();
-  showView("start");
+  route();
 })();
